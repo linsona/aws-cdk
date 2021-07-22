@@ -16,7 +16,7 @@ import { print, warning } from './logging';
  */
 export function printStackDiff(
   oldTemplate: any,
-  newTemplate: cxapi.CloudFormationStackArtifact,
+  newTemplate: cxapi.CloudFormationArtifact,
   strict: boolean,
   context: number,
   stream?: cfnDiff.FormatStream): number {
@@ -55,7 +55,7 @@ export enum RequireApproval {
  *
  * Returns true if the changes are prompt-worthy, false otherwise.
  */
-export function printSecurityDiff(oldTemplate: any, newTemplate: cxapi.CloudFormationStackArtifact, requireApproval: RequireApproval): boolean {
+export function printSecurityDiff(oldTemplate: any, newTemplate: cxapi.CloudFormationArtifact, requireApproval: RequireApproval): boolean {
   const diff = cfnDiff.diffTemplate(oldTemplate, newTemplate.template);
 
   if (difRequiresApproval(diff, requireApproval)) {
@@ -84,7 +84,7 @@ function difRequiresApproval(diff: cfnDiff.TemplateDiff, requireApproval: Requir
   }
 }
 
-function buildLogicalToPathMap(stack: cxapi.CloudFormationStackArtifact) {
+function buildLogicalToPathMap(stack: cxapi.CloudFormationArtifact) {
   const map: { [id: string]: string } = {};
   for (const md of stack.findMetadataByType(cxschema.ArtifactMetadataEntryType.LOGICAL_ID)) {
     map[md.data as string] = md.path;

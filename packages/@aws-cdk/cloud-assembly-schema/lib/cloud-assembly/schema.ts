@@ -16,6 +16,12 @@ export enum ArtifactType {
    */
   AWS_CLOUDFORMATION_STACK = 'aws:cloudformation:stack',
 
+
+  /**
+  * The artifact is an AWS CloudFormation stack set.
+  */
+  AWS_CLOUDFORMATION_STACK_SET = 'aws:cloudformation:stack-set',
+
   /**
    * The artifact contains the CDK application's construct tree.
    */

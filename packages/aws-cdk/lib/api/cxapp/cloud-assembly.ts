@@ -92,29 +92,31 @@ export class CloudAssembly {
     this.directory = assembly.directory;
   }
 
-  public async selectStacks(selector: StackSelector, options: SelectStacksOptions): Promise<StackCollection> {
+  public async selectStacks(selector: StackSelector, options: SelectStacksOptions): Promise<StackCollection <cxapi.CloudFormationArtifact>> {
     const asm = this.assembly;
-    const topLevelStacks = asm.stacks;
+    const topLevelStacksAndStackSets = [...asm.stacks, ...asm.stackSets];
     const stacks = semver.major(asm.version) < 10 ? asm.stacks : asm.stacksRecursively;
+    const stackSets = semver.major(asm.version) < 10 ? asm.stackSets : asm.stackSetsRecursively;
+    const stacksAndStackSets:cxapi.CloudFormationArtifact[] = [...stacks, ...stackSets];
     const allTopLevel = selector.allTopLevel ?? false;
     const patterns = sanitizePatterns(selector.patterns);
 
-    if (stacks.length === 0) {
-      throw new Error('This app contains no stacks');
+    if (stacksAndStackSets.length === 0) {
+      throw new Error('This app contains no stacks or stack sets');
     }
 
     if (allTopLevel) {
-      return this.selectTopLevelStacks(stacks, topLevelStacks, options.extend);
+      return this.selectTopLevelStacks(stacksAndStackSets, topLevelStacksAndStackSets, options.extend);
     } else if (patterns.length > 0) {
-      return this.selectMatchingStacks(stacks, patterns, options.extend);
+      return this.selectMatchingStacks(stacksAndStackSets, patterns, options.extend);
     } else {
-      return this.selectDefaultStacks(stacks, topLevelStacks, options.defaultBehavior);
+      return this.selectDefaultStacks(stacksAndStackSets, topLevelStacksAndStackSets, options.defaultBehavior);
     }
   }
 
-  private selectTopLevelStacks(stacks: cxapi.CloudFormationStackArtifact[],
-    topLevelStacks: cxapi.CloudFormationStackArtifact[],
-    extend: ExtendedStackSelection = ExtendedStackSelection.None): StackCollection {
+  private selectTopLevelStacks<T extends cxapi.CloudFormationArtifact>(stacks: T[],
+    topLevelStacks: T[],
+    extend: ExtendedStackSelection = ExtendedStackSelection.None): StackCollection<T> {
     if (topLevelStacks.length > 0) {
       return this.extendStacks(topLevelStacks, stacks, extend);
     } else {
@@ -122,15 +124,14 @@ export class CloudAssembly {
     }
   }
 
-  private selectMatchingStacks(stacks: cxapi.CloudFormationStackArtifact[],
+  private selectMatchingStacks<T extends cxapi.CloudFormationArtifact>(stacks: T[],
     patterns: string[],
-    extend: ExtendedStackSelection = ExtendedStackSelection.None): StackCollection {
-
+    extend: ExtendedStackSelection = ExtendedStackSelection.None): StackCollection<T> {
     // cli tests use this to ensure tests do not depend on legacy behavior
     // (otherwise they will fail in v2)
     const disableLegacy = process.env.CXAPI_DISABLE_SELECT_BY_ID === '1';
 
-    const matchingPattern = (pattern: string) => (stack: cxapi.CloudFormationStackArtifact) => {
+    const matchingPattern = (pattern: string) => (stack: T) => {
       if (minimatch(stack.hierarchicalId, pattern)) {
         return true;
       } else if (!disableLegacy && stack.id === pattern && semver.major(versionNumber()) < 2) {
@@ -146,8 +147,8 @@ export class CloudAssembly {
     return this.extendStacks(matchedStacks, stacks, extend);
   }
 
-  private selectDefaultStacks(stacks: cxapi.CloudFormationStackArtifact[],
-    topLevelStacks: cxapi.CloudFormationStackArtifact[],
+  private selectDefaultStacks<T extends cxapi.CloudFormationArtifact>(stacks: T[],
+    topLevelStacks: T[],
     defaultSelection: DefaultSelection) {
     switch (defaultSelection) {
       case DefaultSelection.MainAssembly:
@@ -168,10 +169,10 @@ export class CloudAssembly {
     }
   }
 
-  private extendStacks(matched: cxapi.CloudFormationStackArtifact[],
-    all: cxapi.CloudFormationStackArtifact[],
+  private extendStacks<T extends cxapi.CloudFormationArtifact>(matched: T[],
+    all: T[],
     extend: ExtendedStackSelection = ExtendedStackSelection.None) {
-    const allStacks = new Map<string, cxapi.CloudFormationStackArtifact>();
+    const allStacks = new Map<string, T>();
     for (const stack of all) {
       allStacks.set(stack.hierarchicalId, stack);
     }
@@ -190,7 +191,7 @@ export class CloudAssembly {
     // Filter original array because it is in the right order
     const selectedList = all.filter(s => index.has(s.hierarchicalId));
 
-    return new StackCollection(this, selectedList);
+    return new StackCollection<T>(this, selectedList);
   }
 
   /**
@@ -208,8 +209,8 @@ export class CloudAssembly {
  * stacks can be selected independently, but other artifacts such as asset
  * bundles cannot.
  */
-export class StackCollection {
-  constructor(public readonly assembly: CloudAssembly, public readonly stackArtifacts: cxapi.CloudFormationStackArtifact[]) {
+export class StackCollection <T extends cxapi.CloudFormationArtifact> {
+  constructor(public readonly assembly: CloudAssembly, public readonly stackArtifacts: T[]) {
   }
 
   public get stackCount() {
@@ -233,12 +234,12 @@ export class StackCollection {
     return new StackCollection(this.assembly, arts);
   }
 
-  public filter(predicate: (art: cxapi.CloudFormationStackArtifact) => boolean): StackCollection {
-    return new StackCollection(this.assembly, this.stackArtifacts.filter(predicate));
+  public filter(predicate: (art: T) => boolean): StackCollection<T> {
+    return new StackCollection<T>(this.assembly, this.stackArtifacts.filter(predicate));
   }
 
-  public concat(other: StackCollection): StackCollection {
-    return new StackCollection(this.assembly, this.stackArtifacts.concat(other.stackArtifacts));
+  public concat(other: StackCollection<T>): StackCollection<T> {
+    return new StackCollection<T>(this.assembly, this.stackArtifacts.concat(other.stackArtifacts));
   }
 
   /**
@@ -307,8 +308,8 @@ export interface MetadataMessageOptions {
   strict?: boolean;
 }
 
-function indexByHierarchicalId(stacks: cxapi.CloudFormationStackArtifact[]): Map<string, cxapi.CloudFormationStackArtifact> {
-  const result = new Map<string, cxapi.CloudFormationStackArtifact>();
+function indexByHierarchicalId<T extends cxapi.CloudFormationArtifact>(stacks: T[]): Map<string, T> {
+  const result = new Map<string, T>();
 
   for (const stack of stacks) {
     result.set(stack.hierarchicalId, stack);
@@ -322,9 +323,9 @@ function indexByHierarchicalId(stacks: cxapi.CloudFormationStackArtifact[]): Map
  *
  * Modifies `selectedStacks` in-place.
  */
-function includeDownstreamStacks(
-  selectedStacks: Map<string, cxapi.CloudFormationStackArtifact>,
-  allStacks: Map<string, cxapi.CloudFormationStackArtifact>) {
+function includeDownstreamStacks<T extends cxapi.CloudFormationArtifact>(
+  selectedStacks: Map<string, T>,
+  allStacks: Map<string, T>) {
   const added = new Array<string>();
 
   let madeProgress;
@@ -352,8 +353,8 @@ function includeDownstreamStacks(
  * Modifies `selectedStacks` in-place.
  */
 function includeUpstreamStacks(
-  selectedStacks: Map<string, cxapi.CloudFormationStackArtifact>,
-  allStacks: Map<string, cxapi.CloudFormationStackArtifact>) {
+  selectedStacks: Map<string, cxapi.CloudFormationArtifact>,
+  allStacks: Map<string, cxapi.CloudFormationArtifact>) {
   const added = new Array<string>();
   let madeProgress = true;
   while (madeProgress) {

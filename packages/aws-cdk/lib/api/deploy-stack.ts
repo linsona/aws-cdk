@@ -320,8 +320,8 @@ export async function deployStack(options: DeployStackOptions): Promise<DeploySt
  * @param stack     the synthesized stack that provides the CloudFormation template
  * @param toolkitInfo information about the toolkit stack
  */
-async function makeBodyParameter(
-  stack: cxapi.CloudFormationStackArtifact,
+export async function makeBodyParameter(
+  stack: cxapi.CloudFormationArtifact,
   resolvedEnvironment: cxapi.Environment,
   assetManifest: AssetManifestBuilder,
   toolkitInfo: ToolkitInfo): Promise<TemplateBodyParameter> {

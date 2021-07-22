@@ -161,6 +161,55 @@ export class CloudFormationStack {
   }
 }
 
+export class CloudFormationStackSet {
+  public static async lookup(cfn: CloudFormation, stackSetName: string): Promise<CloudFormationStackSet> {
+    try {
+      const response = await cfn.describeStackSet({ StackSetName: stackSetName }).promise();
+      return new CloudFormationStackSet(cfn, stackSetName, response.StackSet);
+    } catch (e) {
+      if (e.code === 'StackSetNotFoundException') {
+        return new CloudFormationStackSet(cfn, stackSetName, undefined);
+      }
+      throw e;
+    }
+  }
+  private _template: any;
+
+  protected constructor(
+    private readonly cfn: CloudFormation,
+    public readonly stackSetName: string,
+    private readonly stackSet?: CloudFormation.StackSet) {
+    this.cfn;
+  }
+
+  /**
+   * Retrieve the stack's deployed template
+   *
+   * Cached, so will only be retrieved once. Will return an empty
+   * structure if the stack does not exist.
+   */
+  public async template(): Promise<Template> {
+    if (!this.exists) {
+      return {};
+    }
+
+    if (this._template === undefined) {
+      const response = await this.cfn.describeStackSet({ StackSetName: this.stackSetName }).promise();
+      if (response.StackSet) {
+        this._template = (response.StackSet.TemplateBody && deserializeStructure(response.StackSet.TemplateBody)) || {};
+      }
+    }
+    return this._template;
+  }
+
+  /**
+  * Whether the stack exists
+  */
+  public get exists() {
+    return this.stackSet !== undefined;
+  }
+}
+
 /**
  * Describe a changeset in CloudFormation, regardless of its current state.
  *

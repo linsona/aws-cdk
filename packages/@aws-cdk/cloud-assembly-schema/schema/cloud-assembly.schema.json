@@ -91,6 +91,7 @@
             "description": "Type of cloud artifact.",
             "enum": [
                 "aws:cloudformation:stack",
+                "aws:cloudformation:stack-set",
                 "cdk:asset-manifest",
                 "cdk:cloud-assembly",
                 "cdk:tree",

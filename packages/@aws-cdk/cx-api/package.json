@@ -150,7 +150,20 @@
       "docs-public-apis:@aws-cdk/cx-api.SynthesisMessageLevel",
       "docs-public-apis:@aws-cdk/cx-api.SynthesisMessageLevel.INFO",
       "docs-public-apis:@aws-cdk/cx-api.SynthesisMessageLevel.WARNING",
-      "docs-public-apis:@aws-cdk/cx-api.SynthesisMessageLevel.ERROR"
+      "docs-public-apis:@aws-cdk/cx-api.SynthesisMessageLevel.ERROR",
+      "docs-public-apis:@aws-cdk/cx-api.CloudAssembly.stackSets",
+      "docs-public-apis:@aws-cdk/cx-api.CloudAssembly.stackSetsRecursively",
+      "docs-public-apis:@aws-cdk/cx-api.CloudFormationArtifact",
+      "docs-public-apis:@aws-cdk/cx-api.CloudFormationStackSetArtifact",
+      "docs-public-apis:@aws-cdk/cx-api.CloudFormationArtifact.displayName",
+      "docs-public-apis:@aws-cdk/cx-api.CloudFormationArtifact.environment",
+      "docs-public-apis:@aws-cdk/cx-api.CloudFormationArtifact.template",
+      "docs-public-apis:@aws-cdk/cx-api.CloudFormationArtifact.templateFile",
+      "docs-public-apis:@aws-cdk/cx-api.CloudFormationArtifact.assumeRoleArn",
+      "docs-public-apis:@aws-cdk/cx-api.CloudFormationArtifact.cloudFormationExecutionRoleArn",
+      "docs-public-apis:@aws-cdk/cx-api.CloudFormationArtifact.stackTemplateAssetObjectUrl",
+      "docs-public-apis:@aws-cdk/cx-api.CloudFormationArtifact.tags",
+      "docs-public-apis:@aws-cdk/cx-api.CloudFormationArtifact.validateOnSynth"
     ]
   },
   "awscdkio": {

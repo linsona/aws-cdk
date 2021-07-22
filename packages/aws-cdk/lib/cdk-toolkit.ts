@@ -8,7 +8,7 @@ import { environmentsFromDescriptors, globEnvironmentsFromStacks, looksLikeGlob 
 import { SdkProvider } from './api/aws-auth';
 import { Bootstrapper, BootstrapEnvironmentOptions } from './api/bootstrap';
 import { CloudFormationDeployments } from './api/cloudformation-deployments';
-import { CloudAssembly, DefaultSelection, ExtendedStackSelection, StackCollection, StackSelector } from './api/cxapp/cloud-assembly';
+import { CloudAssembly, DefaultSelection, ExtendedStackSelection, StackSelector, StackCollection } from './api/cxapp/cloud-assembly';
 import { CloudExecutable } from './api/cxapp/cloud-executable';
 import { StackActivityProgress } from './api/util/cloudformation/stack-activity-monitor';
 import { printSecurityDiff, printStackDiff, RequireApproval } from './diff';
@@ -114,8 +114,6 @@ export class CdkToolkit {
   public async deploy(options: DeployOptions) {
     const stacks = await this.selectStacksForDeploy(options.selector, options.exclusively);
 
-    const requireApproval = options.requireApproval ?? RequireApproval.Broadening;
-
     const parameterMap: { [name: string]: { [name: string]: string | undefined } } = { '*': {} };
     for (const key in options.parameters) {
       if (options.parameters.hasOwnProperty(key)) {
@@ -132,106 +130,139 @@ export class CdkToolkit {
     }
 
     const stackOutputs: { [key: string]: any } = { };
-    const outputsFile = options.outputsFile;
 
     for (const stack of stacks.stackArtifacts) {
       if (stacks.stackCount !== 1) { highlight(stack.displayName); }
-      if (!stack.environment) {
-        // eslint-disable-next-line max-len
-        throw new Error(`Stack ${stack.displayName} does not define an environment, and AWS credentials could not be obtained from standard locations or no region was configured.`);
+      if (stack instanceof cxapi.CloudFormationStackArtifact) {
+        await this.deployStack(stack, parameterMap, stackOutputs, options);
+      } else if (stack instanceof cxapi.CloudFormationStackSetArtifact) {
+        await this.deployStackSet(stack, parameterMap, options);
       }
+    }
+  }
 
-      if (Object.keys(stack.template.Resources || {}).length === 0) { // The generated stack has no resources
-        if (!await this.props.cloudFormation.stackExists({ stack })) {
-          warning('%s: stack has no resources, skipping deployment.', colors.bold(stack.displayName));
-        } else {
-          warning('%s: stack has no resources, deleting existing stack.', colors.bold(stack.displayName));
-          await this.destroy({
-            selector: { patterns: [stack.stackName] },
-            exclusively: true,
-            force: true,
-            roleArn: options.roleArn,
-            fromDeploy: true,
-          });
-        }
-        continue;
-      }
+  public async deployStackSet(
+    stackSet: cxapi.CloudFormationStackSetArtifact,
+    parameterMap: { [name: string]: { [name: string]: string | undefined } },
+    options: DeployOptions) {
 
-      if (requireApproval !== RequireApproval.Never) {
-        const currentTemplate = await this.props.cloudFormation.readCurrentTemplate(stack);
-        if (printSecurityDiff(currentTemplate, stack, requireApproval)) {
+    let tags = options.tags;
+    if (!tags || tags.length === 0) {
+      tags = tagsForStack(stackSet);
+    }
+    await this.props.cloudFormation.deployStackSet({
+      stackSet,
+      deployName: stackSet.stackSetName,
+      roleArn: options.roleArn,
+      parameters: Object.assign({}, parameterMap['*'], parameterMap[stackSet.stackSetName]),
 
-          // only talk to user if STDIN is a terminal (otherwise, fail)
-          if (!process.stdin.isTTY) {
-            throw new Error(
-              '"--require-approval" is enabled and stack includes security-sensitive updates, ' +
-              'but terminal (TTY) is not attached so we are unable to get a confirmation from the user');
-          }
+    });
 
-          const confirmed = await promptly.confirm('Do you wish to deploy these changes (y/n)?');
-          if (!confirmed) { throw new Error('Aborted by user'); }
-        }
-      }
+  }
 
-      print('%s: deploying...', colors.bold(stack.displayName));
+  public async deployStack(
+    stack: cxapi.CloudFormationStackArtifact,
+    parameterMap: { [name: string]: { [name: string]: string | undefined } },
+    stackOutputs: { [key: string]: any },
+    options: DeployOptions) {
 
-      let tags = options.tags;
-      if (!tags || tags.length === 0) {
-        tags = tagsForStack(stack);
-      }
+    const outputsFile = options.outputsFile;
+    const requireApproval = options.requireApproval ?? RequireApproval.Broadening;
+    if (!stack.environment) {
+      // eslint-disable-next-line max-len
+      throw new Error(`Stack ${stack.displayName} does not define an environment, and AWS credentials could not be obtained from standard locations or no region was configured.`);
+    }
 
-      try {
-        const result = await this.props.cloudFormation.deployStack({
-          stack,
-          deployName: stack.stackName,
+    if (Object.keys(stack.template.Resources || {}).length === 0) { // The generated stack has no resources
+      if (!await this.props.cloudFormation.stackExists({ stack })) {
+        warning('%s: stack has no resources, skipping deployment.', colors.bold(stack.displayName));
+      } else {
+        warning('%s: stack has no resources, deleting existing stack.', colors.bold(stack.displayName));
+        await this.destroy({
+          selector: { patterns: [stack.stackName] },
+          exclusively: true,
+          force: true,
           roleArn: options.roleArn,
-          toolkitStackName: options.toolkitStackName,
-          reuseAssets: options.reuseAssets,
-          notificationArns: options.notificationArns,
-          tags,
-          execute: options.execute,
-          changeSetName: options.changeSetName,
-          force: options.force,
-          parameters: Object.assign({}, parameterMap['*'], parameterMap[stack.stackName]),
-          usePreviousParameters: options.usePreviousParameters,
-          progress: options.progress,
-          ci: options.ci,
+          fromDeploy: true,
         });
+      }
+      return;
+    }
 
-        const message = result.noOp
-          ? ' ✅  %s (no changes)'
-          : ' ✅  %s';
+    if (requireApproval !== RequireApproval.Never) {
+      const currentTemplate = await this.props.cloudFormation.readCurrentTemplate(stack);
+      if (printSecurityDiff(currentTemplate, stack, requireApproval)) {
 
-        success('\n' + message, stack.displayName);
-
-        if (Object.keys(result.outputs).length > 0) {
-          print('\nOutputs:');
-
-          stackOutputs[stack.stackName] = result.outputs;
+        // only talk to user if STDIN is a terminal (otherwise, fail)
+        if (!process.stdin.isTTY) {
+          throw new Error(
+            '"--require-approval" is enabled and stack includes security-sensitive updates, ' +
+            'but terminal (TTY) is not attached so we are unable to get a confirmation from the user');
         }
 
-        for (const name of Object.keys(result.outputs).sort()) {
-          const value = result.outputs[name];
-          print('%s.%s = %s', colors.cyan(stack.id), colors.cyan(name), colors.underline(colors.cyan(value)));
-        }
+        const confirmed = await promptly.confirm('Do you wish to deploy these changes (y/n)?');
+        if (!confirmed) { throw new Error('Aborted by user'); }
+      }
+    }
 
-        print('\nStack ARN:');
+    print('%s: deploying...', colors.bold(stack.displayName));
 
-        data(result.stackArn);
-      } catch (e) {
-        error('\n ❌  %s failed: %s', colors.bold(stack.displayName), e);
-        throw e;
-      } finally {
-        // If an outputs file has been specified, create the file path and write stack outputs to it once.
-        // Outputs are written after all stacks have been deployed. If a stack deployment fails,
-        // all of the outputs from successfully deployed stacks before the failure will still be written.
-        if (outputsFile) {
-          fs.ensureFileSync(outputsFile);
-          await fs.writeJson(outputsFile, stackOutputs, {
-            spaces: 2,
-            encoding: 'utf8',
-          });
-        }
+    let tags = options.tags;
+    if (!tags || tags.length === 0) {
+      tags = tagsForStack(stack);
+    }
+
+    try {
+      const result = await this.props.cloudFormation.deployStack({
+        stack,
+        deployName: stack.stackName,
+        roleArn: options.roleArn,
+        toolkitStackName: options.toolkitStackName,
+        reuseAssets: options.reuseAssets,
+        notificationArns: options.notificationArns,
+        tags,
+        execute: options.execute,
+        changeSetName: options.changeSetName,
+        force: options.force,
+        parameters: Object.assign({}, parameterMap['*'], parameterMap[stack.stackName]),
+        usePreviousParameters: options.usePreviousParameters,
+        progress: options.progress,
+        ci: options.ci,
+      });
+
+      const message = result.noOp
+        ? ' ✅  %s (no changes)'
+        : ' ✅  %s';
+
+      success('\n' + message, stack.displayName);
+
+      if (Object.keys(result.outputs).length > 0) {
+        print('\nOutputs:');
+
+        stackOutputs[stack.stackName] = result.outputs;
+      }
+
+      for (const name of Object.keys(result.outputs).sort()) {
+        const value = result.outputs[name];
+        print('%s.%s = %s', colors.cyan(stack.id), colors.cyan(name), colors.underline(colors.cyan(value)));
+      }
+
+      print('\nStack ARN:');
+
+      data(result.stackArn);
+    } catch (e) {
+      error('\n ❌  %s failed: %s', colors.bold(stack.displayName), e);
+      throw e;
+    } finally {
+      // If an outputs file has been specified, create the file path and write stack outputs to it once.
+      // Outputs are written after all stacks have been deployed. If a stack deployment fails,
+      // all of the outputs from successfully deployed stacks before the failure will still be written.
+      if (outputsFile) {
+        fs.ensureFileSync(outputsFile);
+        await fs.writeJson(outputsFile, stackOutputs, {
+          spaces: 2,
+          encoding: 'utf8',
+        });
       }
     }
   }
@@ -252,17 +283,21 @@ export class CdkToolkit {
 
     const action = options.fromDeploy ? 'deploy' : 'destroy';
     for (const stack of stacks.stackArtifacts) {
-      success('%s: destroying...', colors.blue(stack.displayName));
-      try {
-        await this.props.cloudFormation.destroyStack({
-          stack,
-          deployName: stack.stackName,
-          roleArn: options.roleArn,
-        });
-        success(`\n ✅  %s: ${action}ed`, colors.blue(stack.displayName));
-      } catch (e) {
-        error(`\n ❌  %s: ${action} failed`, colors.blue(stack.displayName), e);
-        throw e;
+      if (stack instanceof cxapi.CloudFormationStackArtifact) {
+        success('%s: destroying...', colors.blue(stack.displayName));
+        try {
+          await this.props.cloudFormation.destroyStack({
+            stack,
+            deployName: stack.stackName,
+            roleArn: options.roleArn,
+          });
+          success(`\n ✅  %s: ${action}ed`, colors.blue(stack.displayName));
+        } catch (e) {
+          error(`\n ❌  %s: ${action} failed`, colors.blue(stack.displayName), e);
+          throw e;
+        }
+      } else {
+        error('\n ❌  %s: Stack Set destroy unsupported.', colors.blue(stack.displayName));
       }
     }
   }
@@ -274,11 +309,13 @@ export class CdkToolkit {
     if (options.long) {
       const long = [];
       for (const stack of stacks.stackArtifacts) {
-        long.push({
-          id: stack.id,
-          name: stack.stackName,
-          environment: stack.environment,
-        });
+        if (stack instanceof cxapi.CloudFormationStackArtifact) {
+          long.push({
+            id: stack.id,
+            name: stack.stackName,
+            environment: stack.environment,
+          });
+        }
       }
       return long; // will be YAML formatted output
     }
@@ -301,9 +338,13 @@ export class CdkToolkit {
    * should be supplied, where the templates will be written.
    */
   public async synth(stackNames: string[], exclusively: boolean, quiet: boolean, autoValidate?: boolean): Promise<any> {
+    stackNames;
+    exclusively;
+    quiet;
+    autoValidate;
     const stacks = await this.selectStacksForDiff(stackNames, exclusively, autoValidate);
 
-    // if we have a single stack, print it to STDOUT
+    // // if we have a single stack, print it to STDOUT
     if (stacks.stackCount === 1) {
       if (!quiet) {
         return stacks.firstStack.template;
@@ -435,7 +476,7 @@ export class CdkToolkit {
   /**
    * Validate the stacks for errors and warnings according to the CLI's current settings
    */
-  private async validateStacks(stacks: StackCollection) {
+  private async validateStacks(stacks: StackCollection<cxapi.CloudFormationArtifact>) {
     stacks.processMetadataMessages({
       ignoreErrors: this.props.ignoreErrors,
       strict: this.props.strict,
@@ -657,7 +698,7 @@ export interface DestroyOptions {
 /**
  * @returns an array with the tags available in the stack metadata.
  */
-function tagsForStack(stack: cxapi.CloudFormationStackArtifact): Tag[] {
+function tagsForStack(stack: cxapi.CloudFormationArtifact): Tag[] {
   return Object.entries(stack.tags).map(([Key, Value]) => ({ Key, Value }));
 }
 

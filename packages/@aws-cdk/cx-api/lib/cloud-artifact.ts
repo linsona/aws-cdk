@@ -45,6 +45,8 @@ export class CloudArtifact {
     switch (artifact.type) {
       case cxschema.ArtifactType.AWS_CLOUDFORMATION_STACK:
         return new CloudFormationStackArtifact(assembly, id, artifact);
+      case cxschema.ArtifactType.AWS_CLOUDFORMATION_STACK_SET:
+        return new CloudFormationStackSetArtifact(assembly, id, artifact);
       case cxschema.ArtifactType.CDK_TREE:
         return new TreeCloudArtifact(assembly, id, artifact);
       case cxschema.ArtifactType.ASSET_MANIFEST:
@@ -155,6 +157,6 @@ export class CloudArtifact {
 
 // needs to be defined at the end to avoid a cyclic dependency
 import { AssetManifestArtifact } from './artifacts/asset-manifest-artifact';
-import { CloudFormationStackArtifact } from './artifacts/cloudformation-artifact';
+import { CloudFormationStackArtifact, CloudFormationStackSetArtifact } from './artifacts/cloudformation-artifact';
 import { NestedCloudAssemblyArtifact } from './artifacts/nested-cloud-assembly-artifact';
 import { TreeCloudArtifact } from './artifacts/tree-cloud-artifact';

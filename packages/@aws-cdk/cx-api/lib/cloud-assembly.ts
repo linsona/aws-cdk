@@ -2,7 +2,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import * as cxschema from '@aws-cdk/cloud-assembly-schema';
-import { CloudFormationStackArtifact } from './artifacts/cloudformation-artifact';
+import { CloudFormationStackArtifact, CloudFormationStackSetArtifact } from './artifacts/cloudformation-artifact';
 import { NestedCloudAssemblyArtifact } from './artifacts/nested-cloud-assembly-artifact';
 import { TreeCloudArtifact } from './artifacts/tree-cloud-artifact';
 import { CloudArtifact } from './cloud-artifact';
@@ -142,6 +142,21 @@ export class CloudAssembly {
     return search([], [this]);
   }
 
+  public get stackSetsRecursively(): CloudFormationStackSetArtifact[] {
+    function search(stackSetArtifacts: CloudFormationStackSetArtifact[], assemblies: CloudAssembly[]): CloudFormationStackSetArtifact[] {
+      if (assemblies.length === 0) {
+        return stackSetArtifacts;
+      }
+
+      const [head, ...tail] = assemblies;
+      const nestedAssemblies = head.nestedAssemblies.map(asm => asm.nestedAssembly);
+      return search(stackSetArtifacts.concat(head.stackSets), tail.concat(nestedAssemblies));
+    };
+
+    return search([], [this]);
+  }
+
+
   /**
    * Returns a nested assembly artifact.
    *
@@ -198,6 +213,17 @@ export class CloudAssembly {
 
     function isCloudFormationStackArtifact(x: any): x is CloudFormationStackArtifact {
       return x instanceof CloudFormationStackArtifact;
+    }
+  }
+
+  /**
+   * @returns all the CloudFormation stack artifacts that are included in this assembly.
+   */
+  public get stackSets(): CloudFormationStackSetArtifact[] {
+    return this.artifacts.filter(isCloudFormationStackSetArtifact);
+
+    function isCloudFormationStackSetArtifact(x: any): x is CloudFormationStackSetArtifact {
+      return x instanceof CloudFormationStackSetArtifact;
     }
   }
 

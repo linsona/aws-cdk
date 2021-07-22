@@ -2,6 +2,7 @@ import * as crypto from 'crypto';
 import * as cxschema from '@aws-cdk/cloud-assembly-schema';
 import { ConstructNode, IConstruct, ISynthesisSession } from '../construct-compat';
 import { Stack } from '../stack';
+import { StackSet } from '../stack-set';
 
 /**
  * Shared logic of writing stack artifact to the Cloud Assembly
@@ -59,6 +60,53 @@ export function addStackArtifactToAssembly(
     dependencies: deps.length > 0 ? deps : undefined,
     metadata: Object.keys(meta).length > 0 ? meta : undefined,
     displayName: stack.node.path,
+  });
+}
+
+export function addStackSetArtifactToAssembly(
+  session: ISynthesisSession,
+  stackSet: StackSet,
+  stackSetProps: Partial<cxschema.AwsCloudFormationStackSetProperties>,
+  additionalStackSetDependencies: string[]) {
+
+  // nested stack tags are applied at the AWS::CloudFormation::Stack resource
+  // level and are not needed in the cloud assembly.
+  if (stackSet.tags.hasTags()) {
+    stackSet.node.addMetadata(cxschema.ArtifactMetadataEntryType.STACK_TAGS, stackSet.tags.renderTags());
+  }
+
+  const deps = [
+    ...stackSet.dependencies.map(s => s.artifactId),
+    ...additionalStackSetDependencies,
+  ];
+  const meta = collectStackMetadata(stackSet);
+
+  // backwards compatibility since originally artifact ID was always equal to
+  // stack name the stackName attribute is optional and if it is not specified
+  // the CLI will use the artifact ID as the stack name. we *could have*
+  // always put the stack name here but wanted to minimize the risk around
+  // changes to the assembly manifest. so this means that as long as stack
+  // name and artifact ID are the same, the cloud assembly manifest will not
+  // change.
+  const stackSetNameProperty = stackSet.stackSetName === stackSet.artifactId
+    ? { }
+    : { stackName: stackSet.stackSetName };
+
+  const properties: cxschema.AwsCloudFormationStackSetProperties = {
+    templateFile: stackSet.templateFile,
+    regionConcurrencyType: stackSet.regionConcurrencyType,
+    tags: nonEmptyDict(stackSet.tags.tagValues()),
+    ...stackSetProps,
+    ...stackSetNameProperty,
+  };
+  // add an artifact that represents this stack
+  session.assembly.addArtifact(stackSet.artifactId, {
+    type: cxschema.ArtifactType.AWS_CLOUDFORMATION_STACK_SET,
+    environment: stackSet.environment,
+    properties,
+    dependencies: deps.length > 0 ? deps : undefined,
+    metadata: Object.keys(meta).length > 0 ? meta : undefined,
+    displayName: stackSet.node.path,
   });
 }
 

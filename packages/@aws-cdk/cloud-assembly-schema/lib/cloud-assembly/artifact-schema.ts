@@ -94,6 +94,50 @@ export interface AwsCloudFormationStackProperties {
 }
 
 /**
+ * Artifact properties for CloudFormation stacks.
+ */
+export interface AwsCloudFormationStackSetProperties {
+  /**
+   * A file relative to the assembly root which contains the CloudFormation template for this stack.
+   */
+  readonly templateFile: string;
+
+  /**
+   * Values for CloudFormation stack parameters that should be passed when the stack is deployed.
+   *
+   * @default - No parameters
+   */
+  readonly parameters?: { [id: string]: string };
+
+  /**
+   * Values for CloudFormation stack tags that should be passed when the stack is deployed.
+   *
+   * @default - No tags
+   */
+  readonly tags?: { [id: string]: string };
+
+  /**
+   * The name to use for the CloudFormation stack.
+   * @default - name derived from artifact ID
+   */
+  readonly stackSetName?: string;
+
+  /**
+   * Stack set operational preference for region concurrency type
+   *
+   * @default - Derived from construct path.
+   */
+  readonly regionConcurrencyType?: string;
+
+  /**
+   * If the stack template has already been included in the asset manifest, its asset URL
+   *
+   * @default - Not uploaded yet, upload just before deploying
+   */
+  readonly stackTemplateAssetObjectUrl?: string;
+}
+
+/**
  * Artifact properties for the Asset Manifest
  */
 export interface AssetManifestProperties {
@@ -154,6 +198,7 @@ export interface NestedCloudAssemblyProperties {
  * Properties for manifest artifacts
  */
 export type ArtifactProperties = AwsCloudFormationStackProperties
+| AwsCloudFormationStackSetProperties
 | AssetManifestProperties
 | TreeArtifactProperties
 | NestedCloudAssemblyProperties;

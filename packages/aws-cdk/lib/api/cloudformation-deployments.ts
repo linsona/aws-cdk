@@ -5,8 +5,9 @@ import { debug } from '../logging';
 import { publishAssets } from '../util/asset-publishing';
 import { Mode, SdkProvider } from './aws-auth';
 import { deployStack, DeployStackResult, destroyStack } from './deploy-stack';
+import { deployStackSet, DeployStackSetResult } from './deploy-stack-set';
 import { ToolkitInfo } from './toolkit-info';
-import { CloudFormationStack, Template } from './util/cloudformation';
+import { CloudFormationStack, Template, CloudFormationStackSet } from './util/cloudformation';
 import { StackActivityProgress } from './util/cloudformation/stack-activity-monitor';
 
 /**
@@ -131,6 +132,74 @@ export interface DeployStackOptions {
   readonly ci?: boolean;
 }
 
+export interface DeployStackSetOptions {
+  /**
+   * Stack to deploy
+   */
+  stackSet: cxapi.CloudFormationStackSetArtifact;
+
+  /**
+   * Execution role for the deployment (pass through to CloudFormation)
+   *
+   * @default - Current role
+   */
+  roleArn?: string;
+
+  /**
+   * Topic ARNs to send a message when deployment finishes (pass through to CloudFormation)
+   *
+   * @default - No notifications
+   */
+  notificationArns?: string[];
+
+  /**
+   * Override name under which stack will be deployed
+   *
+   * @default - Use artifact default
+   */
+  deployName?: string;
+
+  /**
+   * Don't show stack deployment events, just wait
+   *
+   * @default false
+   */
+  quiet?: boolean;
+
+  /**
+   * Name of the toolkit stack, if not the default name
+   *
+   * @default 'CDKToolkit'
+   */
+  toolkitStackName?: string;
+
+  /**
+   * List of asset IDs which should NOT be built or uploaded
+   *
+   * @default - Build all assets
+   */
+  reuseAssets?: string[];
+
+  /**
+   * Stack tags (pass through to CloudFormation)
+   */
+  tags?: Tag[];
+
+
+  /**
+   * Force deployment, even if the deployed template is identical to the one we are about to deploy.
+   * @default false deployment will be skipped if the template is identical
+   */
+  force?: boolean;
+
+  /**
+   * Extra parameters for CloudFormation
+   * @default - no additional parameters will be passed to the template
+   */
+  parameters?: { [name: string]: string | undefined };
+
+}
+
 export interface DestroyStackOptions {
   stack: cxapi.CloudFormationStackArtifact;
   deployName?: string;
@@ -161,13 +230,19 @@ export class CloudFormationDeployments {
     this.sdkProvider = props.sdkProvider;
   }
 
-  public async readCurrentTemplate(stackArtifact: cxapi.CloudFormationStackArtifact): Promise<Template> {
+  public async readCurrentTemplate(stackArtifact: cxapi.CloudFormationArtifact): Promise<Template> {
     debug(`Reading existing template for stack ${stackArtifact.displayName}.`);
     const { stackSdk } = await this.prepareSdkFor(stackArtifact, undefined, Mode.ForReading);
     const cfn = stackSdk.cloudFormation();
-
-    const stack = await CloudFormationStack.lookup(cfn, stackArtifact.stackName);
-    return stack.template();
+    if (stackArtifact instanceof cxapi.CloudFormationStackArtifact) {
+      const stack = await CloudFormationStack.lookup(cfn, stackArtifact.stackName);
+      return stack.template();
+    } else if (stackArtifact instanceof cxapi.CloudFormationStackSetArtifact) {
+      const stack = await CloudFormationStackSet.lookup(cfn, stackArtifact.stackSetName);
+      return stack.template();
+    } else {
+      throw new Error('Unknown artifact type.');
+    }
   }
 
   public async deployStack(options: DeployStackOptions): Promise<DeployStackResult> {
@@ -207,6 +282,22 @@ export class CloudFormationDeployments {
     });
   }
 
+  public async deployStackSet(options: DeployStackSetOptions): Promise<DeployStackSetResult> {
+    const { stackSdk, resolvedEnvironment, cloudFormationRoleArn } = await this.prepareSdkFor(options.stackSet, options.roleArn);
+    const toolkitInfo = await ToolkitInfo.lookup(resolvedEnvironment, stackSdk, options.toolkitStackName);
+    return deployStackSet({
+      stackSet: options.stackSet,
+      resolvedEnvironment,
+      deployName: options.deployName,
+      sdk: stackSdk,
+      sdkProvider: this.sdkProvider,
+      roleArn: cloudFormationRoleArn,
+      tags: options.tags,
+      parameters: options.parameters,
+      toolkitInfo,
+    });
+  }
+
   public async destroyStack(options: DestroyStackOptions): Promise<void> {
     const { stackSdk, cloudFormationRoleArn: roleArn } = await this.prepareSdkFor(options.stack, options.roleArn);
 
@@ -234,31 +325,48 @@ export class CloudFormationDeployments {
    * - SDK loaded with the right credentials for calling `CreateChangeSet`.
    * - The Execution Role that should be passed to CloudFormation.
    */
-  private async prepareSdkFor(stack: cxapi.CloudFormationStackArtifact, roleArn?: string, mode = Mode.ForWriting) {
+  private async prepareSdkFor(stack: cxapi.CloudFormationArtifact, roleArn?: string, mode = Mode.ForWriting) {
     if (!stack.environment) {
       throw new Error(`The stack ${stack.displayName} does not have an environment`);
     }
 
     const resolvedEnvironment = await this.sdkProvider.resolveEnvironment(stack.environment);
 
-    // Substitute any placeholders with information about the current environment
-    const arns = await replaceEnvPlaceholders({
-      assumeRoleArn: stack.assumeRoleArn,
+    if (stack instanceof cxapi.CloudFormationStackArtifact ) {
+      const arns = await replaceEnvPlaceholders({
+        assumeRoleArn: stack.assumeRoleArn,
 
-      // Use the override if given, otherwise use the field from the stack
-      cloudFormationRoleArn: roleArn ?? stack.cloudFormationExecutionRoleArn,
-    }, resolvedEnvironment, this.sdkProvider);
+        // Use the override if given, otherwise use the field from the stack
+        cloudFormationRoleArn: roleArn ?? stack.cloudFormationExecutionRoleArn,
+      }, resolvedEnvironment, this.sdkProvider);
 
-    const stackSdk = await this.sdkProvider.forEnvironment(resolvedEnvironment, mode, {
-      assumeRoleArn: arns.assumeRoleArn,
-      assumeRoleExternalId: stack.assumeRoleExternalId,
-    });
+      const stackSdk = await this.sdkProvider.forEnvironment(resolvedEnvironment, mode, {
+        assumeRoleArn: arns.assumeRoleArn,
+        assumeRoleExternalId: stack.assumeRoleExternalId,
+      });
 
-    return {
-      stackSdk,
-      resolvedEnvironment,
-      cloudFormationRoleArn: arns.cloudFormationRoleArn,
-    };
+      return {
+        stackSdk,
+        resolvedEnvironment,
+        cloudFormationRoleArn: arns.cloudFormationRoleArn,
+      };
+    } else if (stack instanceof cxapi.CloudFormationStackSetArtifact ) {
+      const arns = await replaceEnvPlaceholders({
+        assumeRoleArn: stack.assumeRoleArn,
+      }, resolvedEnvironment, this.sdkProvider);
+
+      const stackSdk = await this.sdkProvider.forEnvironment(resolvedEnvironment, mode, {
+        assumeRoleArn: arns.assumeRoleArn,
+        assumeRoleExternalId: stack.assumeRoleExternalId,
+      });
+
+      return {
+        stackSdk,
+        resolvedEnvironment,
+      };
+    } else {
+      throw new Error('Unknown CloudFormation Artifact Type');
+    }
   }
 
   /**

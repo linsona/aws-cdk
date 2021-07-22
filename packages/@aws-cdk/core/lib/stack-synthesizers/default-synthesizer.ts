@@ -506,7 +506,7 @@ export class DefaultStackSynthesizer extends StackSynthesizer {
   /**
    * Write an asset manifest to the Cloud Assembly, return the artifact IDs written
    */
-  private writeAssetManifest(session: ISynthesisSession): string {
+  protected writeAssetManifest(session: ISynthesisSession): string {
     assertBound(this.stack);
 
     const artifactId = `${this.stack.artifactId}.assets`;

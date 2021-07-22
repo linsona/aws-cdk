@@ -8,7 +8,7 @@ export function looksLikeGlob(environment: string) {
 }
 
 // eslint-disable-next-line max-len
-export async function globEnvironmentsFromStacks(stacks: StackCollection, environmentGlobs: string[], sdk: SdkProvider): Promise<cxapi.Environment[]> {
+export async function globEnvironmentsFromStacks(stacks: StackCollection<cxapi.CloudFormationArtifact>, environmentGlobs: string[], sdk: SdkProvider): Promise<cxapi.Environment[]> {
   if (environmentGlobs.length === 0) { return []; }
 
   const availableEnvironments = new Array<cxapi.Environment>();
